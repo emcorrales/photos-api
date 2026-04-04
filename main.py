@@ -19,6 +19,13 @@ s3 = boto3.client("s3", region_name=AWS_REGION)
 dynamodb = boto3.resource("dynamodb", region_name=AWS_REGION)
 table = dynamodb.Table(DYNAMODB_TABLE)
 
+def _handle_client_error(e: ClientError):
+    code = e.response["Error"]["Code"]
+    if code == "AccessDenied" or code == "AccessDeniedException":
+        raise HTTPException(status_code=403, detail="Access denied to AWS resource")
+    raise HTTPException(status_code=500, detail="An internal error occurred")
+
+
 app = FastAPI(title="Photos API")
 
 app.add_middleware(
@@ -47,19 +54,22 @@ async def upload_photo(file: UploadFile = File(...)):
             ContentType=file.content_type,
         )
     except ClientError as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        _handle_client_error(e)
 
     uploaded_at = datetime.now(timezone.utc).isoformat()
-    table.put_item(
-        Item={
-            "id": photo_id,
-            "key": key,
-            "filename": file.filename,
-            "size": size,
-            "content_type": file.content_type,
-            "uploaded_at": uploaded_at,
-        }
-    )
+    try:
+        table.put_item(
+            Item={
+                "id": photo_id,
+                "key": key,
+                "filename": file.filename,
+                "size": size,
+                "content_type": file.content_type,
+                "uploaded_at": uploaded_at,
+            }
+        )
+    except ClientError as e:
+        _handle_client_error(e)
 
     return {
         "id": photo_id,
@@ -75,7 +85,10 @@ def list_photos(
     sort_by: Literal["date", "name", "size"] = "date",
     order: Literal["asc", "desc"] = "desc",
 ):
-    response = table.scan()
+    try:
+        response = table.scan()
+    except ClientError as e:
+        _handle_client_error(e)
     items = response.get("Items", [])
 
     sort_key = {"date": "uploaded_at", "name": "filename", "size": "size"}[sort_by]
@@ -94,15 +107,21 @@ def list_photos(
 
 @app.get("/photos/{photo_id}")
 def get_photo(photo_id: str):
-    response = table.get_item(Key={"id": photo_id})
+    try:
+        response = table.get_item(Key={"id": photo_id})
+    except ClientError as e:
+        _handle_client_error(e)
     item = response.get("Item")
     if not item:
         raise HTTPException(status_code=404, detail="Photo not found")
 
-    url = s3.generate_presigned_url(
-        "get_object",
-        Params={"Bucket": S3_BUCKET, "Key": item["key"]},
-        ExpiresIn=3600,
-    )
+    try:
+        url = s3.generate_presigned_url(
+            "get_object",
+            Params={"Bucket": S3_BUCKET, "Key": item["key"]},
+            ExpiresIn=3600,
+        )
+    except ClientError as e:
+        _handle_client_error(e)
 
     return {"url": url, "metadata": item}

@@ -2,9 +2,17 @@ from io import BytesIO
 from unittest.mock import MagicMock, patch
 
 import pytest
+from botocore.exceptions import ClientError
 from fastapi.testclient import TestClient
 
 from main import app
+
+
+def _make_client_error(code="AccessDenied"):
+    return ClientError(
+        {"Error": {"Code": code, "Message": "test error"}},
+        "TestOperation",
+    )
 
 client = TestClient(app)
 
@@ -166,3 +174,104 @@ def test_get_photo_not_found(mock_table):
     response = client.get("/photos/nonexistent")
 
     assert response.status_code == 404
+
+
+# --- Access Denied tests ---
+
+
+@patch("main.table")
+@patch("main.s3")
+def test_upload_s3_access_denied(mock_s3, mock_table):
+    mock_s3.put_object.side_effect = _make_client_error("AccessDenied")
+
+    response = client.post(
+        "/upload",
+        files={"file": ("test.jpg", BytesIO(b"fake image data"), "image/jpeg")},
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Access denied to AWS resource"
+
+
+@patch("main.table")
+@patch("main.s3")
+def test_upload_dynamodb_access_denied(mock_s3, mock_table):
+    mock_s3.put_object.return_value = {}
+    mock_table.put_item.side_effect = _make_client_error("AccessDeniedException")
+
+    response = client.post(
+        "/upload",
+        files={"file": ("test.jpg", BytesIO(b"fake image data"), "image/jpeg")},
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Access denied to AWS resource"
+
+
+@patch("main.table")
+def test_list_photos_access_denied(mock_table):
+    mock_table.scan.side_effect = _make_client_error("AccessDenied")
+
+    response = client.get("/photos")
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Access denied to AWS resource"
+
+
+@patch("main.table")
+def test_get_photo_dynamodb_access_denied(mock_table):
+    mock_table.get_item.side_effect = _make_client_error("AccessDeniedException")
+
+    response = client.get("/photos/aaa")
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Access denied to AWS resource"
+
+
+@patch("main.table")
+@patch("main.s3")
+def test_get_photo_s3_access_denied(mock_s3, mock_table):
+    mock_table.get_item.return_value = {"Item": MOCK_ITEMS[0]}
+    mock_s3.generate_presigned_url.side_effect = _make_client_error("AccessDenied")
+
+    response = client.get("/photos/aaa")
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Access denied to AWS resource"
+
+
+# --- Generic ClientError (500) tests ---
+
+
+@patch("main.table")
+@patch("main.s3")
+def test_upload_s3_generic_error(mock_s3, mock_table):
+    mock_s3.put_object.side_effect = _make_client_error("InternalError")
+
+    response = client.post(
+        "/upload",
+        files={"file": ("test.jpg", BytesIO(b"fake image data"), "image/jpeg")},
+    )
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "An internal error occurred"
+
+
+@patch("main.table")
+def test_list_photos_generic_error(mock_table):
+    mock_table.scan.side_effect = _make_client_error("InternalError")
+
+    response = client.get("/photos")
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "An internal error occurred"
+
+
+@patch("main.table")
+def test_get_photo_generic_error(mock_table):
+    mock_table.get_item.side_effect = _make_client_error("InternalError")
+
+    response = client.get("/photos/aaa")
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "An internal error occurred"
