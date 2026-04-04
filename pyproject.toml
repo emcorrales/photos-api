@@ -1,5 +1,5 @@
 [project]
-name = "photos"
+name = "photos-api"
 version = "0.1.0"
 description = "Photo upload API"
 authors = [
@@ -25,3 +25,6 @@ dev = [
     "pytest-asyncio (>=1.3.0,<2.0.0)",
     "httpx (>=0.28.1,<0.29.0)"
 ]
+
+[tool.poetry]
+package-mode = false
