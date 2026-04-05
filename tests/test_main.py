@@ -18,7 +18,7 @@ client = TestClient(app)
 
 MOCK_ITEMS = [
     {
-        "id": "aaa",
+        "photos-dev-partition": "aaa",
         "key": "aaa/photo_a.jpg",
         "filename": "photo_a.jpg",
         "size": 300,
@@ -26,7 +26,7 @@ MOCK_ITEMS = [
         "uploaded_at": "2024-01-03T00:00:00+00:00",
     },
     {
-        "id": "bbb",
+        "photos-dev-partition": "bbb",
         "key": "bbb/photo_b.jpg",
         "filename": "photo_b.jpg",
         "size": 100,
@@ -34,7 +34,7 @@ MOCK_ITEMS = [
         "uploaded_at": "2024-01-01T00:00:00+00:00",
     },
     {
-        "id": "ccc",
+        "photos-dev-partition": "ccc",
         "key": "ccc/photo_c.jpg",
         "filename": "photo_c.jpg",
         "size": 200,
@@ -124,9 +124,9 @@ def test_list_photos_sort_by_date_desc(mock_table):
     response = client.get("/photos?sort_by=date&order=desc")
 
     items = response.json()["items"]
-    assert items[0]["id"] == "aaa"
-    assert items[1]["id"] == "ccc"
-    assert items[2]["id"] == "bbb"
+    assert items[0]["photos-dev-partition"] == "aaa"
+    assert items[1]["photos-dev-partition"] == "ccc"
+    assert items[2]["photos-dev-partition"] == "bbb"
 
 
 @patch("main.table")
@@ -156,7 +156,7 @@ def test_list_photos_sort_by_size_desc(mock_table):
 @patch("main.table")
 @patch("main.s3")
 def test_get_photo_success(mock_s3, mock_table):
-    mock_table.get_item.return_value = {"Item": MOCK_ITEMS[0]}
+    mock_table.query.return_value = {"Items": [MOCK_ITEMS[0]]}
     mock_s3.generate_presigned_url.return_value = "https://presigned.url/photo"
 
     response = client.get("/photos/aaa")
@@ -164,12 +164,12 @@ def test_get_photo_success(mock_s3, mock_table):
     assert response.status_code == 200
     data = response.json()
     assert data["url"] == "https://presigned.url/photo"
-    assert data["metadata"]["id"] == "aaa"
+    assert data["metadata"]["photos-dev-partition"] == "aaa"
 
 
 @patch("main.table")
 def test_get_photo_not_found(mock_table):
-    mock_table.get_item.return_value = {}
+    mock_table.query.return_value = {"Items": []}
 
     response = client.get("/photos/nonexistent")
 
@@ -220,7 +220,7 @@ def test_list_photos_access_denied(mock_table):
 
 @patch("main.table")
 def test_get_photo_dynamodb_access_denied(mock_table):
-    mock_table.get_item.side_effect = _make_client_error("AccessDeniedException")
+    mock_table.query.side_effect = _make_client_error("AccessDeniedException")
 
     response = client.get("/photos/aaa")
 
@@ -231,7 +231,7 @@ def test_get_photo_dynamodb_access_denied(mock_table):
 @patch("main.table")
 @patch("main.s3")
 def test_get_photo_s3_access_denied(mock_s3, mock_table):
-    mock_table.get_item.return_value = {"Item": MOCK_ITEMS[0]}
+    mock_table.query.return_value = {"Items": [MOCK_ITEMS[0]]}
     mock_s3.generate_presigned_url.side_effect = _make_client_error("AccessDenied")
 
     response = client.get("/photos/aaa")
@@ -269,7 +269,7 @@ def test_list_photos_generic_error(mock_table):
 
 @patch("main.table")
 def test_get_photo_generic_error(mock_table):
-    mock_table.get_item.side_effect = _make_client_error("InternalError")
+    mock_table.query.side_effect = _make_client_error("InternalError")
 
     response = client.get("/photos/aaa")
 

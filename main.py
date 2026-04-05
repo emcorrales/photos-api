@@ -60,7 +60,8 @@ async def upload_photo(file: UploadFile = File(...)):
     try:
         table.put_item(
             Item={
-                "id": photo_id,
+                "photos-dev-partition": photo_id,
+                "photos-dev-sort": uploaded_at,
                 "key": key,
                 "filename": file.filename,
                 "size": size,
@@ -108,20 +109,24 @@ def list_photos(
 @app.get("/photos/{photo_id}")
 def get_photo(photo_id: str):
     try:
-        response = table.get_item(Key={"id": photo_id})
+        response = table.query(
+            KeyConditionExpression="#pk = :pk",
+            ExpressionAttributeNames={"#pk": "photos-dev-partition"},
+            ExpressionAttributeValues={":pk": photo_id},
+        )
     except ClientError as e:
         _handle_client_error(e)
-    item = response.get("Item")
-    if not item:
+    items = response.get("Items", [])
+    if not items:
         raise HTTPException(status_code=404, detail="Photo not found")
 
     try:
         url = s3.generate_presigned_url(
             "get_object",
-            Params={"Bucket": S3_BUCKET, "Key": item["key"]},
+            Params={"Bucket": S3_BUCKET, "Key": items[0]["key"]},
             ExpiresIn=3600,
         )
     except ClientError as e:
         _handle_client_error(e)
 
-    return {"url": url, "metadata": item}
+    return {"url": url, "metadata": items[0]}
